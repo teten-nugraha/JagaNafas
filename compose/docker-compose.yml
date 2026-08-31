@@ -54,7 +54,7 @@ services:
     ports:
       - "8082:8080"
     volumes:
-      - ../services/scheduler-service/logs:/app/logs
+      - scheduler_logs:/app/logs
     depends_on:
       redis:
         condition: service_healthy
@@ -77,7 +77,7 @@ services:
     ports:
       - "8083:8080"
     volumes:
-      - ../services/risk-engine-service/logs:/app/logs
+      - risk_engine_logs:/app/logs
     depends_on:
       redis:
         condition: service_healthy
@@ -103,7 +103,7 @@ services:
     ports:
       - "8084:8080"
     volumes:
-      - ../services/telegram-notifier-service/logs:/app/logs
+      - telegram_notifier_logs:/app/logs
     depends_on:
       redis:
         condition: service_healthy
@@ -129,7 +129,7 @@ services:
     ports:
       - "8085:8080"
     volumes:
-      - ../services/bot-service/logs:/app/logs
+      - bot_service_logs:/app/logs
     depends_on:
       redis:
         condition: service_healthy
@@ -146,3 +146,7 @@ volumes:
   postgres_data:
   redis_data:
   redisinsight_data:
+  scheduler_logs:
+  risk_engine_logs:
+  telegram_notifier_logs:
+  bot_service_logs:
