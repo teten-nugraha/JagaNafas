@@ -26,7 +26,7 @@ Aplikasi cuaca/AQI yang ada sekarang umumnya:
 1. Memberikan **early warning** kondisi udara berisiko ke penderita ISPA/asma berdasarkan lokasi tempat tinggal mereka.
 2. Personalisasi risk score berdasarkan tingkat sensitivitas masing-masing user (bukan AQI generik).
 3. Menghindari notification fatigue — alert hanya dikirim saat relevan (bukan spam tiap jam).
-4. Sebagai portofolio: menunjukkan kemampuan membangun sistem **event-driven, stateful, dan personalized** menggunakan Kafka, Redis, dan Postgres secara terintegrasi dan bermakna (bukan sekadar CRUD).
+4. Sebagai portofolio: menunjukkan kemampuan membangun sistem **event-driven, stateful, dan personalized** menggunakan Redis Streams dan Postgres secara terintegrasi dan bermakna (bukan sekadar CRUD).
 
 ### Non-Goals (Out of Scope untuk v1)
 - Tidak menggantikan diagnosis medis — hanya alat bantu informasi.
@@ -89,26 +89,27 @@ Alasan pemilihan nama: singkat, dua suku kata familiar dalam Bahasa Indonesia (j
                     [Open-Meteo API: AQI + Cuaca]
                                   |
                                   v
-                 Kafka Topic: raw-environment-data
+              Redis Stream: raw-environment-data
                                   |
                                   v
                 +-----------------------------------+
-                |     Kafka Consumer Service          |
-                |  (Spring Kafka @KafkaListener)      |
+                |     Risk Engine Consumer Group      |
+                |  (Spring Data Redis: StreamListener)|
                 |  - enrich data                      |
-                |  - hitung rolling trend (Redis)     |
+                |  - hitung rolling trend (Redis      |
+                |    Sorted Set/List sbg time window)  |
                 |  - join dgn subscription (Postgres) |
                 |  - hitung personalized risk score   |
-                |  - debounce check (Redis)           |
+                |  - debounce check (Redis key TTL)   |
                 +-----------------+-------------------+
                                   |
               +-------------------+-------------------+
               v                                        v
-  Kafka Topic: risk-scores                Kafka Topic: risk-alerts
+  Redis Stream: risk-scores                Redis Stream: risk-alerts
               |                                        |
               v                                        v
    [Redis: cache skor per lokasi]          [Telegram Notifier Service]
-   [Postgres: risk_score_history]          (Spring Kafka Consumer →
+   [Postgres: risk_score_history]          (Redis Stream Consumer Group →
                                              Telegram Bot API sendMessage)
                                                         |
                                                         v
@@ -131,14 +132,27 @@ Alasan pemilihan nama: singkat, dua suku kata familiar dalam Bahasa Indonesia (j
 |---|---|---|
 | Bahasa & Framework | **Kotlin + Spring Boot 4** | Semua service |
 | Bot Interface | **Telegram Bot API** (via `telegrambots` lib atau webhook manual) | Interaksi user |
-| Message Broker | **Apache Kafka** | Pipeline data environment → risk scoring → alert |
-| Stream Processing | **Spring Kafka Consumer** (bukan Kafka Streams DSL, state di Redis) | Hitung skor & trend |
-| State & Cache | **Redis** | Rolling window data, debounce alert, cache skor per lokasi, rate limit |
+| Message Broker & Stream Processing | **Redis Streams** (`XADD`/`XREADGROUP`, consumer group per service) | Pipeline data environment → risk scoring → alert, sekaligus komputasi stateful |
+| State & Cache | **Redis** (Sorted Set/List untuk rolling window, String dgn TTL untuk debounce, Hash untuk cache skor) | Rolling window trend, debounce alert, cache skor per lokasi, rate limit |
 | Database | **PostgreSQL** | User, profil sensitivitas, subscription, histori skor, histori alert |
 | Sumber Data | **Open-Meteo API** (AQI + Cuaca, gratis tanpa API key) | Data mentah |
 | Deployment | Docker Compose (lokal), Railway/Fly.io (demo live) | Hosting |
 
-> **Catatan desain:** v1 menggunakan Kafka Consumer biasa (bukan Kafka Streams DSL) dengan state management manual di Redis untuk mengurangi kompleksitas operasional, sambil tetap mempertahankan karakteristik event-driven & stateful processing. Migrasi ke Kafka Streams dapat menjadi *v2 enhancement* jika ingin showcase kemampuan lebih lanjut.
+> **Catatan desain:** v1 menggunakan **Redis Streams** sebagai message broker sekaligus tulang punggung stream processing, menggantikan Apache Kafka untuk menyederhanakan operasional (satu infrastruktur — Redis — untuk streaming, state, dan cache, tanpa perlu Zookeeper/KRaft & broker terpisah). Setiap tahap pipeline (`raw-environment-data` → `risk-scores` → `risk-alerts`) adalah Redis Stream dengan consumer group masing-masing (`XREADGROUP` + `XACK`) sehingga tetap punya jaminan at-least-once delivery dan kemampuan replay. Rolling window trend dan state lain dihitung manual memakai struktur data Redis (Sorted Set/List), bukan state store terkelola seperti Kafka Streams — trade-off ini dipilih demi kesederhanaan operasional, dengan konsekuensi state management (idempotency, TTL, cleanup) menjadi tanggung jawab kode aplikasi. Pendekatan ini tetap mempertahankan karakteristik event-driven & stateful processing sebagai nilai jual portofolio, dengan kompleksitas infrastruktur yang jauh lebih rendah dibanding Kafka.
+
+### 7.1 Topologi Deployment
+
+Diagram di bagian 6 menunjukkan **4 komponen logis**:
+
+1. **Scheduler** — polling Open-Meteo, publish ke `stream:raw-environment-data`.
+2. **Risk Engine** — consumer group yang menghitung trend & risk score.
+3. **Telegram Notifier** — consumer group yang mengirim alert ke Telegram.
+4. **Telegram Bot Service** — handle command user & webhook Telegram.
+
+Untuk v1, keempatnya dijalankan sebagai **satu modular monolith** (1 Spring Boot app, 1 Docker image, 4 package/module terpisah: `scheduler`, `riskengine`, `notifier`, `bot`) — bukan 4 service terpisah. Alasan:
+- Menyederhanakan deployment di free-tier hosting (1 container, bukan 4).
+- Konsumen Redis Stream tetap berjalan sebagai background listener (`@Component` + `StreamMessageListenerContainer`) di dalam proses yang sama, sehingga karakteristik event-driven & stateful tetap terlihat di kode tanpa overhead operasional multi-service.
+- Batas antar modul tetap dijaga rapi (package-per-modul, tidak saling import internal) sehingga bisa dipecah jadi service terpisah di v2 jika diperlukan (misal untuk showcase scaling independen).
 
 ---
 
@@ -201,13 +215,15 @@ alert_history (
 
 ---
 
-## 9. Kafka Topics
+## 9. Redis Streams
 
-| Topic | Key | Payload | Deskripsi |
+| Stream Key | Consumer Group | Payload (fields) | Deskripsi |
 |---|---|---|---|
-| `raw-environment-data` | `locationId` | `{ locationId, pm25, pm10, temp, humidity, timestamp }` | Data mentah hasil polling |
-| `risk-scores` | `userId` | `{ userId, locationId, score, trend, timestamp }` | Skor risiko per user-lokasi, semua nilai (untuk histori) |
-| `risk-alerts` | `userId` | `{ userId, locationId, score, message, timestamp }` | Hanya yang lolos threshold & debounce |
+| `stream:raw-environment-data` | `cg-risk-engine` | `locationId, pm25, pm10, temp, humidity, timestamp` | Data mentah hasil polling |
+| `stream:risk-scores` | `cg-score-writer` | `userId, locationId, score, trend, timestamp` | Skor risiko per user-lokasi, semua nilai (untuk histori) |
+| `stream:risk-alerts` | `cg-telegram-notifier` | `userId, locationId, score, message, timestamp` | Hanya yang lolos threshold & debounce |
+
+> Setiap consumer membaca via `XREADGROUP` dan meng-`XACK` setelah pesan berhasil diproses; pesan yang gagal diproses (pending) dapat direplay dengan `XCLAIM`/`XAUTOCLAIM` untuk menjamin at-least-once delivery.
 
 ---
 
@@ -218,7 +234,7 @@ alert_history (
 **Langkah:**
 1. Normalisasi PM2.5/PM10 ke skala 0–100 berdasarkan standar WHO/BMKG.
 2. Hitung *discomfort index* dari suhu + kelembapan (heat index sederhana).
-3. Hitung **trend** dengan membandingkan nilai saat ini vs rata-rata 3 jam terakhir (disimpan di Redis sebagai list/rolling window per lokasi) — kenaikan cepat diberi bobot lebih tinggi.
+3. Hitung **trend** dengan membandingkan nilai saat ini vs rata-rata 3 jam terakhir (disimpan sebagai Redis Sorted Set per `locationId`, di-score dengan timestamp, entry lama di luar window dibuang dgn `ZREMRANGEBYSCORE`) — kenaikan cepat diberi bobot lebih tinggi.
 4. Kalikan dengan **multiplier sensitivitas** user (1.0 untuk umum, sampai 1.8 untuk asma berat).
 5. Hasil akhir: skor 0–100, dikategorikan:
    - 0–30 → Aman
@@ -267,9 +283,9 @@ Ketik /status untuk cek kondisi terkini.
 ## 13. Non-Functional Requirements
 
 - **Latency:** dari polling data sampai notifikasi terkirim maksimal < 2 menit.
-- **Reliability:** service consumer harus idempotent — reprocessing pesan Kafka yang sama tidak boleh mengirim alert dobel (cek debounce state di Redis sebelum publish ke topic `risk-alerts`).
-- **Observability:** logging terstruktur (JSON) untuk setiap tahap pipeline; expose metrics dasar via Spring Actuator.
-- **Testability:** integration test untuk consumer/producer Kafka dan interaksi Postgres/Redis menggunakan **Testcontainers**.
+- **Reliability:** consumer group harus idempotent — reprocessing pesan Redis Stream yang sama (misal setelah crash sebelum `XACK`) tidak boleh mengirim alert dobel (cek debounce state di Redis sebelum publish ke stream `risk-alerts`); pending entries di-monitor & direplay via `XAUTOCLAIM`.
+- **Observability:** logging terstruktur (JSON) untuk setiap tahap pipeline; expose metrics dasar via Spring Actuator, termasuk consumer lag (`XPENDING`/`XINFO GROUPS`) per stream.
+- **Testability:** integration test untuk consumer/producer Redis Streams dan interaksi Postgres/Redis menggunakan **Testcontainers**.
 
 ---
 
@@ -277,11 +293,11 @@ Ketik /status untuk cek kondisi terkini.
 
 | Fase | Deliverable |
 |---|---|
-| 1. Setup | Docker Compose (Kafka, Redis, Postgres), skeleton Spring Boot project, skema DB |
-| 2. Data Ingestion | Scheduler polling Open-Meteo → publish ke `raw-environment-data` |
+| 1. Setup | Docker Compose (Redis, Postgres), skeleton Spring Boot project, skema DB |
+| 2. Data Ingestion | Scheduler polling Open-Meteo → publish ke `stream:raw-environment-data` |
 | 3. Bot Dasar | `/start`, input lokasi, input profil sensitivitas, simpan ke Postgres |
-| 4. Risk Engine | Consumer service: enrichment, trend calculation (Redis), risk scoring, publish ke `risk-scores` |
-| 5. Alert Engine | Debounce logic, publish ke `risk-alerts`, Telegram Notifier Service kirim pesan |
+| 4. Risk Engine | Consumer group: enrichment, trend calculation (Redis), risk scoring, publish ke `stream:risk-scores` |
+| 5. Alert Engine | Debounce logic, publish ke `stream:risk-alerts`, Telegram Notifier Service kirim pesan |
 | 6. Command Tambahan | `/status`, `/riwayat`, `/ubahlokasi`, `/ubahprofil`, `/berhenti` |
 | 7. Testing | Unit test + integration test (Testcontainers) |
 | 8. Deployment | Deploy ke Railway/Fly.io, setup webhook Telegram production |

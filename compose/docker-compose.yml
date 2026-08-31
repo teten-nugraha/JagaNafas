@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+     Mau bikin, mau bikin Ini. Baca dulu, baca Ude. Hm? Yang What a dua! No, I do, honey. Di meja dapur di I Eh, You Text It was in a dikit, emang. Yang Kenapa? Enggak tahu, Kayaknya asam lambungnya naik kali, mohon maaf. Makanya Yes, but that's fine. So, you want to see? Yeah, how 20 teh. Per orang. Per orang. Kalau, kalau diantar doang 15 maksudnya. Bye!
     container_name: jaganapas-postgres
     restart: unless-stopped
     environment:
@@ -32,51 +32,19 @@ services:
       timeout: 5s
       retries: 5
 
-  kafka:
-    image: confluentinc/cp-kafka:7.6.1
-    container_name: jaganapas-kafka
+  redis-ui:
+    image: redis/redisinsight:latest
+    container_name: jaganapas-redis-ui
     restart: unless-stopped
     ports:
-      - "9092:9092"
-      - "9101:9101"
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
-      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      CLUSTER_ID: "7c4fmnAGQ3eZIZA1Vh0iRg"
+      - "8081:5540"
     volumes:
-      - kafka_data:/var/lib/kafka/data
-    healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1"]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-      start_period: 30s
-
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: jaganapas-kafka-ui
-    restart: unless-stopped
-    ports:
-      - "8081:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: jaganapas
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
-      DYNAMIC_CONFIG_ENABLED: "true"
+      - redisinsight_data:/data
     depends_on:
-      kafka:
+      redis:
         condition: service_healthy
 
 volumes:
   postgres_data:
   redis_data:
-  kafka_data:
+  redisinsight_data:
