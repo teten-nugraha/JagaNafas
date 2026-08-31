@@ -1,6 +1,6 @@
 services:
   postgres:
-     Mau bikin, mau bikin Ini. Baca dulu, baca Ude. Hm? Yang What a dua! No, I do, honey. Di meja dapur di I Eh, You Text It was in a dikit, emang. Yang Kenapa? Enggak tahu, Kayaknya asam lambungnya naik kali, mohon maaf. Makanya Yes, but that's fine. So, you want to see? Yeah, how 20 teh. Per orang. Per orang. Kalau, kalau diantar doang 15 maksudnya. Bye!
+    image: postgres:16-alpine
     container_name: jaganapas-postgres
     restart: unless-stopped
     environment:
@@ -43,6 +43,104 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+
+  scheduler-service:
+    build:
+      context: ../services/scheduler-service
+    container_name: jaganapas-scheduler-service
+    restart: unless-stopped
+    env_file:
+      - ./env/scheduler-service.env
+    ports:
+      - "8082:8080"
+    volumes:
+      - ../services/scheduler-service/logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/scheduler", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  risk-engine-service:
+    build:
+      context: ../services/risk-engine-service
+    container_name: jaganapas-risk-engine-service
+    restart: unless-stopped
+    env_file:
+      - ./env/risk-engine-service.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-jaganapas}:${POSTGRES_PASSWORD:-jaganapas}@postgres:5432/${POSTGRES_DB:-jaganapas}?sslmode=disable
+    ports:
+      - "8083:8080"
+    volumes:
+      - ../services/risk-engine-service/logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/riskengine", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  telegram-notifier-service:
+    build:
+      context: ../services/telegram-notifier-service
+    container_name: jaganapas-telegram-notifier-service
+    restart: unless-stopped
+    env_file:
+      - ./env/telegram-notifier-service.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-jaganapas}:${POSTGRES_PASSWORD:-jaganapas}@postgres:5432/${POSTGRES_DB:-jaganapas}?sslmode=disable
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    ports:
+      - "8084:8080"
+    volumes:
+      - ../services/telegram-notifier-service/logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/notifier", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  bot-service:
+    build:
+      context: ../services/bot-service
+    container_name: jaganapas-bot-service
+    restart: unless-stopped
+    env_file:
+      - ./env/bot-service.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-jaganapas}:${POSTGRES_PASSWORD:-jaganapas}@postgres:5432/${POSTGRES_DB:-jaganapas}?sslmode=disable
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    ports:
+      - "8085:8080"
+    volumes:
+      - ../services/bot-service/logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/bot", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   postgres_data:

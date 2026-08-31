@@ -81,7 +81,7 @@ Alasan pemilihan nama: singkat, dua suku kata familiar dalam Bahasa Indonesia (j
 
 ```
                     +---------------------------+
-                    |  Scheduler (Spring)        |
+                    |  Scheduler (Golang)         |
                     |  poll tiap 15 menit         |
                     +-------------+---------------+
                                   |
@@ -94,7 +94,7 @@ Alasan pemilihan nama: singkat, dua suku kata familiar dalam Bahasa Indonesia (j
                                   v
                 +-----------------------------------+
                 |     Risk Engine Consumer Group      |
-                |  (Spring Data Redis: StreamListener)|
+                |  (Golang: goroutine worker XREADGROUP)|
                 |  - enrich data                      |
                 |  - hitung rolling trend (Redis      |
                 |    Sorted Set/List sbg time window)  |
@@ -117,7 +117,7 @@ Alasan pemilihan nama: singkat, dua suku kata familiar dalam Bahasa Indonesia (j
 
         +----------------------------------------+
         |         Telegram Bot Service             |
-        |  (Spring Boot + Telegram Bot API/Webhook) |
+        |  (Golang + Telegram Bot API/Webhook)      |
         |  - handle /start, lokasi, profil          |
         |  - simpan ke Postgres (users, subs)       |
         |  - baca Redis untuk /status               |
@@ -130,15 +130,17 @@ Alasan pemilihan nama: singkat, dua suku kata familiar dalam Bahasa Indonesia (j
 
 | Komponen | Teknologi | Peran |
 |---|---|---|
-| Bahasa & Framework | **Kotlin + Spring Boot 4** | Semua service |
-| Bot Interface | **Telegram Bot API** (via `telegrambots` lib atau webhook manual) | Interaksi user |
-| Message Broker & Stream Processing | **Redis Streams** (`XADD`/`XREADGROUP`, consumer group per service) | Pipeline data environment → risk scoring → alert, sekaligus komputasi stateful |
+| Bahasa & Framework | **Golang** (net/http + `chi` router, tanpa framework berat) | Semua service |
+| Bot Interface | **Telegram Bot API** (via `go-telegram-bot-api` atau webhook manual) | Interaksi user |
+| Message Broker & Stream Processing | **Redis Streams** (`XADD`/`XREADGROUP` via `go-redis/v9`, consumer group per service) | Pipeline data environment → risk scoring → alert, sekaligus komputasi stateful |
 | State & Cache | **Redis** (Sorted Set/List untuk rolling window, String dgn TTL untuk debounce, Hash untuk cache skor) | Rolling window trend, debounce alert, cache skor per lokasi, rate limit |
-| Database | **PostgreSQL** | User, profil sensitivitas, subscription, histori skor, histori alert |
+| Database | **PostgreSQL** (akses via `pgx`/`sqlc`) | User, profil sensitivitas, subscription, histori skor, histori alert |
 | Sumber Data | **Open-Meteo API** (AQI + Cuaca, gratis tanpa API key) | Data mentah |
 | Deployment | Docker Compose (lokal), Railway/Fly.io (demo live) | Hosting |
 
 > **Catatan desain:** v1 menggunakan **Redis Streams** sebagai message broker sekaligus tulang punggung stream processing, menggantikan Apache Kafka untuk menyederhanakan operasional (satu infrastruktur — Redis — untuk streaming, state, dan cache, tanpa perlu Zookeeper/KRaft & broker terpisah). Setiap tahap pipeline (`raw-environment-data` → `risk-scores` → `risk-alerts`) adalah Redis Stream dengan consumer group masing-masing (`XREADGROUP` + `XACK`) sehingga tetap punya jaminan at-least-once delivery dan kemampuan replay. Rolling window trend dan state lain dihitung manual memakai struktur data Redis (Sorted Set/List), bukan state store terkelola seperti Kafka Streams — trade-off ini dipilih demi kesederhanaan operasional, dengan konsekuensi state management (idempotency, TTL, cleanup) menjadi tanggung jawab kode aplikasi. Pendekatan ini tetap mempertahankan karakteristik event-driven & stateful processing sebagai nilai jual portofolio, dengan kompleksitas infrastruktur yang jauh lebih rendah dibanding Kafka.
+>
+> **Kenapa Golang (bukan Kotlin/Spring Boot):** binary tunggal tanpa JVM warm-up membuat startup & footprint memori jauh lebih ringan — cocok untuk free-tier hosting di roadmap (bagian 14). Goroutine + channel memetakan langsung ke model consumer group Redis Streams (satu goroutine per consumer, `context.Context` untuk graceful shutdown) tanpa perlu framework reactive terpisah. Trade-off: lebih sedikit "magic"/auto-wiring dibanding Spring — dependency injection, routing, dan konfigurasi ditulis eksplisit, yang untuk skala v1 (modular monolith) dianggap sepadan dengan kesederhanaan operasionalnya.
 
 ### 7.1 Topologi Deployment
 
@@ -149,10 +151,10 @@ Diagram di bagian 6 menunjukkan **4 komponen logis**:
 3. **Telegram Notifier** — consumer group yang mengirim alert ke Telegram.
 4. **Telegram Bot Service** — handle command user & webhook Telegram.
 
-Untuk v1, keempatnya dijalankan sebagai **satu modular monolith** (1 Spring Boot app, 1 Docker image, 4 package/module terpisah: `scheduler`, `riskengine`, `notifier`, `bot`) — bukan 4 service terpisah. Alasan:
-- Menyederhanakan deployment di free-tier hosting (1 container, bukan 4).
-- Konsumen Redis Stream tetap berjalan sebagai background listener (`@Component` + `StreamMessageListenerContainer`) di dalam proses yang sama, sehingga karakteristik event-driven & stateful tetap terlihat di kode tanpa overhead operasional multi-service.
-- Batas antar modul tetap dijaga rapi (package-per-modul, tidak saling import internal) sehingga bisa dipecah jadi service terpisah di v2 jika diperlukan (misal untuk showcase scaling independen).
+Untuk v1, keempatnya dijalankan sebagai **satu modular monolith** (1 Go binary, 1 Docker image multi-stage build, 4 package terpisah: `internal/scheduler`, `internal/riskengine`, `internal/notifier`, `internal/bot`) — bukan 4 service terpisah. Alasan:
+- Menyederhanakan deployment di free-tier hosting (1 container, bukan 4; image hasil `CGO_ENABLED=0 go build` bisa di-base `scratch`/`distroless` sehingga sangat kecil).
+- Konsumen Redis Stream berjalan sebagai goroutine long-running per consumer group (loop `XREADGROUP` dengan `context.Context` untuk graceful shutdown lewat `signal.NotifyContext`), sehingga karakteristik event-driven & stateful tetap terlihat di kode tanpa overhead operasional multi-service.
+- Batas antar modul tetap dijaga rapi (package-per-modul di bawah `internal/`, tidak saling import internal — dijaga otomatis oleh Go compiler) sehingga bisa dipecah jadi service terpisah di v2 jika diperlukan (misal untuk showcase scaling independen).
 
 ---
 
@@ -276,7 +278,7 @@ Ketik /status untuk cek kondisi terkini.
 | `/api/locations/{id}/current` | GET | Skor risiko terkini suatu lokasi (baca Redis) |
 | `/api/users/{id}/history` | GET | Histori skor risiko user (baca Postgres) |
 | `/api/admin/subscriptions` | GET | Daftar semua subscription aktif (untuk debugging) |
-| `/actuator/health` | GET | Health check service |
+| `/healthz` | GET | Health check service |
 
 ---
 
@@ -284,8 +286,8 @@ Ketik /status untuk cek kondisi terkini.
 
 - **Latency:** dari polling data sampai notifikasi terkirim maksimal < 2 menit.
 - **Reliability:** consumer group harus idempotent — reprocessing pesan Redis Stream yang sama (misal setelah crash sebelum `XACK`) tidak boleh mengirim alert dobel (cek debounce state di Redis sebelum publish ke stream `risk-alerts`); pending entries di-monitor & direplay via `XAUTOCLAIM`.
-- **Observability:** logging terstruktur (JSON) untuk setiap tahap pipeline; expose metrics dasar via Spring Actuator, termasuk consumer lag (`XPENDING`/`XINFO GROUPS`) per stream.
-- **Testability:** integration test untuk consumer/producer Redis Streams dan interaksi Postgres/Redis menggunakan **Testcontainers**.
+- **Observability:** logging terstruktur (JSON) untuk setiap tahap pipeline via `log/slog`; expose `/healthz` & `/metrics` (Prometheus format via `prometheus/client_golang`), termasuk consumer lag (`XPENDING`/`XINFO GROUPS`) per stream.
+- **Testability:** integration test untuk consumer/producer Redis Streams dan interaksi Postgres/Redis menggunakan **testcontainers-go**.
 
 ---
 
@@ -293,7 +295,7 @@ Ketik /status untuk cek kondisi terkini.
 
 | Fase | Deliverable |
 |---|---|
-| 1. Setup | Docker Compose (Redis, Postgres), skeleton Spring Boot project, skema DB |
+| 1. Setup | Docker Compose (Redis, Postgres), skeleton Go project (go.mod, struktur `internal/`), skema DB |
 | 2. Data Ingestion | Scheduler polling Open-Meteo → publish ke `stream:raw-environment-data` |
 | 3. Bot Dasar | `/start`, input lokasi, input profil sensitivitas, simpan ke Postgres |
 | 4. Risk Engine | Consumer group: enrichment, trend calculation (Redis), risk scoring, publish ke `stream:risk-scores` |

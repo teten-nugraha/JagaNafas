@@ -1,1 +1,54 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
 compose/.env
+compose/env/
+compose/.env.*
+!compose/.env.example
+
+### Gradle / Kotlin / Java (services/*) ###
+.gradle/
+**/build/
+!**/src/**/build/
+!gradle/wrapper/gradle-wrapper.jar
+**/out/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+*.class
+HELP.md
+
+### Go (jika ada service Go) ###
+services/*/bin/
+services/*/tmp/
+services/**/main.exe
+
+### Node (jika ada tooling JS) ###
+node_modules/
+npm-debug.log*
+
+### Logs ###
+*.log
+services/*/logs/
+logs/
+
+### IDE ###
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+.factorypath
+.springBeans
+.sts4-cache/
+
+### OS ###
+.DS_Store
+Thumbs.db
+desktop.ini
+
+### Docker ###
+*.pid

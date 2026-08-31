@@ -1,0 +1,12 @@
+[
+  { "id": 1, "name": "Bandung", "lat": -6.9175, "lon": 107.6191 },
+  { "id": 2, "name": "Jakarta", "lat": -6.2088, "lon": 106.8456 },
+  { "id": 3, "name": "Surabaya", "lat": -7.2575, "lon": 112.7521 },
+  { "id": 4, "name": "Medan", "lat": 3.5952, "lon": 98.6722 },
+  { "id": 5, "name": "Semarang", "lat": -6.9932, "lon": 110.4203 },
+  { "id": 6, "name": "Makassar", "lat": -5.1477, "lon": 119.4327 },
+  { "id": 7, "name": "Palembang", "lat": -2.9761, "lon": 104.7754 },
+  { "id": 8, "name": "Depok", "lat": -6.4025, "lon": 106.7942 },
+  { "id": 9, "name": "Tangerang", "lat": -6.1783, "lon": 106.6319 },
+  { "id": 10, "name": "Bekasi", "lat": -6.2383, "lon": 106.9756 }
+]

@@ -1,0 +1,9 @@
+.env
+scheduler
+logs/
+
+services/scheduler-service/.idea/
+services/scheduler-service/logs/**
+
+services/risk-engine-service/.idea
+services/risk-engine-service/logs/**
