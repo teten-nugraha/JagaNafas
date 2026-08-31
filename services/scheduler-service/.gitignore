@@ -1,5 +1,5 @@
 .env
-scheduler
+/scheduler
 logs/
 
 services/scheduler-service/.idea/
