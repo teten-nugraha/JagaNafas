@@ -16,6 +16,16 @@ Format 1080×1350 (4:5, portrait feed), urutkan sesuai nomor file saat upload se
 | [06-manfaat.png](06-manfaat.png) | Manfaat — untuk siapa saja JagaNapas berguna |
 | [07-cta.png](07-cta.png) | Call-to-action penutup |
 
+Setiap slide yang menampilkan handle bot juga menegaskan platform-nya (badge "Bot Telegram" + langkah "Buka Telegram → cari @jaga_nafas_bot") supaya jelas ini bukan aplikasi/website, tapi bot di Telegram — penting karena nama "JagaNapas" sendiri tidak menyebut Telegram.
+
+## All-in-one: satu gambar rangkuman
+
+| File | Isi |
+|---|---|
+| [00-all-in-one.png](00-all-in-one.png) | Poster tunggal (1080×3332) merangkum semua bagian carousel jadi satu gambar panjang |
+
+**Bukan untuk feed post biasa** — rasio jauh melebihi batas maksimal Instagram (±4:5). Cocok untuk Story, link-in-bio, broadcast WhatsApp, atau referensi visual — bukan upload langsung ke feed (akan ke-crop otomatis oleh Instagram).
+
 ## Caption saran
 
 ```
